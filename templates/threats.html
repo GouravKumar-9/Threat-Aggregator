@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block styles %}
+.search-section { margin-bottom: 32px; }
+.search-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+.search-input {
+  flex: 1;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  padding: 11px 16px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.search-result { margin-top: 12px; padding: 14px 18px; border-radius: var(--radius-sm); font-size: 0.875rem; display: none; }
+.search-result.clean { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); color: var(--text); }
+.search-result.threat { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25); color: var(--text); }
+
+.table-section { margin-bottom: 32px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+thead tr { border-bottom: 1px solid var(--border); }
+thead th { text-align: left; padding: 10px 14px; color: var(--muted); text-transform: uppercase; font-size: 0.72rem; }
+tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
+tbody tr:hover { background: var(--surface-hov); }
+tbody td { padding: 11px 14px; vertical-align: middle; }
+
+.badge { padding: 2px 10px; border-radius: 99px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.badge-ip { background: rgba(56,189,248,0.15); color: var(--accent); border: 1px solid rgba(56,189,248,0.25); }
+.badge-url { background: rgba(167,139,250,0.15); color: var(--purple); border: 1px solid rgba(167,139,250,0.25); }
+.badge-domain { background: rgba(251,191,36,0.15); color: var(--warning); border: 1px solid rgba(251,191,36,0.25); }
+.badge-other { background: rgba(100,116,139,0.15); color: var(--muted); border: 1px solid rgba(100,116,139,0.25); }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+@keyframes scanLine {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.scanner-container {
+  position: relative;
+  overflow: hidden;
+}
+.scanner-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--purple), transparent);
+  box-shadow: 0 0 15px 2px var(--accent-glow);
+  z-index: 10;
+  opacity: 0;
+  animation: scanLine 4s var(--ease) infinite;
+  pointer-events: none;
+}
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <h2>Threat Database</h2>
+</div>
+
+<!-- ── Search ────────────────────────────────────────────── -->
+<div class="search-section card animate-fade-up delay-1 scanner-container">
+  <div class="scanner-line"></div>
+  <div class="card-title">🔍 IoC Lookup</div>
+  <p style="font-size:0.82rem;color:var(--muted);margin:6px 0 14px;">
+    Search the database for a specific IP address, URL, or domain.
+  </p>
+  <div class="search-bar">
+    <input
+      id="search-input"
+      class="search-input"
+      type="text"
+      placeholder="e.g. 185.220.101.45 or http://malicious.example.com"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
+      onkeydown="if(event.key==='Enter') doSearch()"
+    />
+    <button class="btn btn-primary" onclick="doSearch()">Search</button>
+  </div>
+  <div class="search-result" id="search-result"></div>
+</div>
+
+<!-- ── Recent IoCs Table ─────────────────────────────────── -->
+<div class="table-section animate-fade-up delay-2">
+  <div class="section-header">
+    <h2>⚡ Database Entries</h2>
+    <button class="btn btn-ghost" onclick="loadRecent()">↻ Refresh</button>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x: auto;">
+      <table id="ioc-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Indicator</th>
+            <th>Type</th>
+            <th>Source</th>
+            <th>Confidence</th>
+            <th>Last Seen (UTC)</th>
+          </tr>
+        </thead>
+        <tbody id="ioc-tbody">
+          <tr>
+            <td colspan="6">
+              <div class="empty-state">
+                <div class="icon">⏳</div>
+                <h3>Loading data...</h3>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function typeBadge(t) {
+  const map = { IP: 'badge-ip', URL: 'badge-url', Domain: 'badge-domain' };
+  const cls = map[t] || 'badge-other';
+  return `<span class="badge ${cls}">${t || '?'}</span>`;
+}
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  const resEl = document.getElementById('search-result');
+  if (!q) { resEl.style.display = 'none'; return; }
+
+  resEl.style.display = 'block';
+  resEl.className = 'search-result';
+  resEl.innerHTML = '<span style="color:var(--muted)">Searching...</span>';
+
+  try {
+    const fetchPromises = [
+      fetch(`/api/search?q=${encodeURIComponent(q)}`).then(async r => ({ name: 'db', status: r.status, data: await r.json() })),
+      fetch(`/api/vt/lookup?q=${encodeURIComponent(q)}`).then(async r => ({ name: 'vt', status: r.status, data: await r.json() }))
+    ];
+    const results = await Promise.all(fetchPromises);
+    const dbRes = results.find(r => r.name === 'db');
+    const vtRes = results.find(r => r.name === 'vt');
+
+    let html = '';
+    if (dbRes.status === 200 && dbRes.data.results && dbRes.data.results.length > 0) {
+      resEl.className = 'search-result threat';
+      html += `<strong>⚠️ Known Threat (Local DB)</strong><br>`;
+      html += `Found ${dbRes.data.results.length} record(s). Latest source: ${esc(dbRes.data.results[0].source)}<br><br>`;
+    } else {
+      resEl.className = 'search-result clean';
+      html += `<strong>✅ Clean (Local DB)</strong><br>Not found in local database.<br><br>`;
+    }
+
+    if (vtRes.status === 200 && vtRes.data.found) {
+      const ms = vtRes.data.malicious_stats || {};
+      const badCount = ms.malicious || 0;
+      if (badCount > 0) {
+        resEl.className = 'search-result threat';
+        html += `<strong>⚠️ VirusTotal: Malicious</strong><br>`;
+        html += `${badCount} security vendors flagged this.`;
+      } else {
+        html += `<strong>✅ VirusTotal: Clean</strong><br>0 engines flagged this.`;
+      }
+    } else {
+      html += `<strong>VirusTotal:</strong> No data or error.`;
+    }
+    resEl.innerHTML = html;
+  } catch (err) {
+    resEl.className = 'search-result';
+    resEl.style.border = '1px solid var(--danger)';
+    resEl.innerHTML = 'Error performing search.';
+  }
+}
+
+async function loadRecent() {
+  try {
+    // We fetch more here, e.g., 50
+    const res = await fetch('/api/recent?n=50');
+    const d = await res.json();
+    const rows = d.results || [];
+    const tbody = document.getElementById('ioc-tbody');
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="icon">📭</div><h3>No data yet</h3></div></td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = rows.map((r, i) => `
+      <tr>
+        <td style="color:var(--muted);font-size:0.78rem">${r.id}</td>
+        <td><span class="mono">${esc(r.ioc_value)}</span></td>
+        <td>${typeBadge(r.ioc_type)}</td>
+        <td style="color:var(--muted);">${esc(r.source)}</td>
+        <td>${r.confidence_score || 50}/100</td>
+        <td style="color:var(--muted);font-size:0.78rem">${r.last_seen || r.timestamp || '—'}</td>
+      </tr>
+    `).join('');
+  } catch (err) { console.error(err); }
+}
+
+loadRecent();
+</script>
+{% endblock %}

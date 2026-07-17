@@ -1,0 +1,12 @@
+requests==2.31.0
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-dotenv
+passlib
+bcrypt<4.0.0
+PyJWT
+python-multipart
+pyotp
+qrcode
+jinja2==3.1.4
+APScheduler

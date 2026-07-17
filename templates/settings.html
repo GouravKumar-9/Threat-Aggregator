@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block styles %}
+.update-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.05), rgba(167, 139, 250, 0.05));
+  border: 1px solid var(--border);
+  box-shadow: none;
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+}
+.update-info h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
+.update-info p { font-size: 0.85rem; color: var(--muted); }
+#update-status-msg { font-size: 0.85rem; margin-top: 12px; min-height: 18px; font-weight: 500; }
+#update-status-msg.success { color: var(--success); }
+#update-status-msg.running { color: var(--warning); }
+#update-status-msg.error { color: var(--danger); }
+
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(0,0,0,0.3);
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.config-card {
+  margin-bottom: 24px;
+}
+.config-group {
+  margin-bottom: 16px;
+}
+.config-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.config-input {
+  width: 100%;
+  max-width: 500px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  outline: none;
+}
+.config-input[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <h2>Settings & Integrations</h2>
+</div>
+
+<!-- ── Feed Update Panel ─────────────────────────────────── -->
+<div class="update-panel animate-fade-up delay-1">
+  <div class="update-info">
+    <h3>🔄 Manual Feed Sync</h3>
+    <p>Pull the latest IoCs from configured threat intelligence feeds instantly.</p>
+    <div id="update-status-msg"></div>
+  </div>
+  <button class="btn btn-primary" id="update-btn" onclick="triggerUpdate()">
+    ⬇ Sync Feeds Now
+  </button>
+</div>
+
+<!-- ── System Status ─────────────────────────────────── -->
+<div class="card config-card animate-fade-up delay-2">
+  <div class="card-title">System Status</div>
+  <p style="font-size: 0.85rem; color: var(--muted); line-height: 1.6;">
+    <strong>APScheduler:</strong> Running (Automated sync every 60 mins)<br>
+    <strong>Webhook Alerts:</strong> Enabled (Listening via internal notify)<br>
+    <strong>GeoIP Batching:</strong> Configured (ip-api.com limits applied)
+  </p>
+</div>
+
+<!-- ── API Keys (Mock) ─────────────────────────────────── -->
+<div class="card config-card animate-fade-up delay-3">
+  <div class="card-title">API Keys</div>
+  
+  <div class="config-group">
+    <label class="config-label">VirusTotal API Key</label>
+    <input type="password" class="config-input" value="************************" disabled>
+  </div>
+  
+  <div class="config-group">
+    <label class="config-label">AbuseIPDB API Key</label>
+    <input type="password" class="config-input" value="************************" disabled>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function triggerUpdate() {
+  const btn = document.getElementById('update-btn');
+  const msg = document.getElementById('update-status-msg');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Syncing...';
+  msg.className = 'running';
+  msg.textContent = 'Triggered feed update. Check back in a moment...';
+
+  try {
+    await fetch('/api/update', { method: 'POST' });
+    pollStatus();
+  } catch (err) {
+    msg.className = 'error';
+    msg.textContent = 'Failed to trigger update.';
+    btn.disabled = false;
+    btn.innerHTML = '⬇ Sync Feeds Now';
+  }
+}
+
+async function pollStatus() {
+  const btn = document.getElementById('update-btn');
+  const msg = document.getElementById('update-status-msg');
+  
+  try {
+    const res = await fetch('/api/update/status');
+    const st = await res.json();
+    
+    if (st.running) {
+      setTimeout(pollStatus, 3000);
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '⬇ Sync Feeds Now';
+      
+      if (st.last_result && st.last_result.startsWith('Error:')) {
+        msg.className = 'error';
+        msg.textContent = st.last_result;
+      } else if (st.last_result) {
+        msg.className = 'success';
+        msg.textContent = st.last_result;
+        showToast(st.last_result, 'success');
+      }
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = '⬇ Sync Feeds Now';
+  }
+}
+
+pollStatus();
+</script>
+{% endblock %}

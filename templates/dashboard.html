@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block head %}
+<!-- Scripts moved to base.html for Swup compatibility -->
+{% endblock %}
+
+{% block styles %}
+/* ─── Globe ─────────────────────────────────────────────── */
+#globe-container {
+  width: 100%;
+  height: 380px;
+  margin-bottom: 28px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: radial-gradient(ellipse at center, rgba(0,30,60,0.6) 0%, var(--bg) 100%);
+}
+.globe-loading {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.1em;
+  animation: glowPulse 2s infinite;
+}
+
+/* ─── Stats ─────────────────────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+  padding: 0 32px;
+}
+.stat-card {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+.stat-icon { font-size: 1.8rem; line-height: 1; }
+.stat-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.9rem;
+  font-weight: 900;
+  color: var(--accent);
+  text-shadow: 0 0 20px var(--accent-glow);
+  min-height: 2.4rem;
+}
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ─── Charts ─────────────────────────────────────────────── */
+.charts-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+  padding: 0 32px;
+}
+@media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+.chart-wrapper         { position: relative; height: 300px; }
+.chart-wrapper.donut   { height: 280px; }
+
+/* ─── Scanline Decorations ─────────────────────────────── */
+.scan-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--purple), transparent);
+  animation: scanline 4s linear infinite;
+  opacity: 0.6;
+}
+{% endblock %}
+
+{% block content %}
+<div class="topbar animate-fade-up" style="padding: 32px 32px 0 32px;">
+  <h2>⚡ Mission Control — Dashboard</h2>
+</div>
+
+<!-- ── Globe ─────────────────────────────────────────────── -->
+<div id="globe-container" class="animate-fade-up">
+  <div class="scan-bar"></div>
+  <div class="globe-loading" id="globe-loading">Initializing 3D Threat Map…</div>
+</div>
+
+<!-- ── Stats ─────────────────────────────────────────────── -->
+<div class="stats-grid">
+  <div class="stat-card card animate-fade-up delay-1">
+    <div class="stat-icon">🎯</div>
+    <div class="stat-value" id="stat-total">—</div>
+    <div class="stat-label">Total IoCs Tracked</div>
+  </div>
+  <div class="stat-card card animate-fade-up delay-2">
+    <div class="stat-icon">🌐</div>
+    <div class="stat-value" id="stat-sources">—</div>
+    <div class="stat-label">Active Feed Sources</div>
+  </div>
+  <div class="stat-card card animate-fade-up delay-3">
+    <div class="stat-icon">🔴</div>
+    <div class="stat-value" id="stat-ips">—</div>
+    <div class="stat-label">Malicious IPs</div>
+  </div>
+  <div class="stat-card card animate-fade-up delay-4">
+    <div class="stat-icon">🔗</div>
+    <div class="stat-value" id="stat-urls">—</div>
+    <div class="stat-label">Malicious URLs</div>
+  </div>
+</div>
+
+<!-- ── Charts ─────────────────────────────────────────────── -->
+<div class="charts-grid">
+  <div class="card animate-fade-up delay-2">
+    <div class="card-title">Top Threat Sources</div>
+    <div class="chart-wrapper">
+      <canvas id="chart-sources"></canvas>
+    </div>
+  </div>
+  <div class="card animate-fade-up delay-3">
+    <div class="card-title">IoC Type Distribution</div>
+    <div class="chart-wrapper donut">
+      <canvas id="chart-types"></canvas>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // Register GSAP TextPlugin for number scramble
+  if (window.gsap && window.TextPlugin) {
+    gsap.registerPlugin(TextPlugin);
+  }
+
+  Chart.defaults.color = '#7a9bbf';
+  Chart.defaults.borderColor = 'rgba(100,180,255,0.06)';
+
+  function fmt(n) { return (typeof n === 'number') ? n.toLocaleString() : '—'; }
+
+  // Scramble count-up animation
+  function scrambleTo(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (window.gsap && window.TextPlugin) {
+      gsap.to(el, { duration: 1.8, text: { value: fmt(val), delimiter: '', speed: 1 }, ease: 'power3.out' });
+    } else {
+      // Fallback: simple counter
+      let start = 0, end = val || 0, dur = 1200;
+      const step = end / (dur / 16);
+      const timer = setInterval(() => {
+        start = Math.min(start + step, end);
+        el.textContent = Math.round(start).toLocaleString();
+        if (start >= end) clearInterval(timer);
+      }, 16);
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) return;
+      const d = await res.json();
+
+      scrambleTo('stat-total',   d.total ?? 0);
+      scrambleTo('stat-sources', (d.by_source || []).length);
+
+      let ips = 0, urls = 0;
+      (d.by_type || []).forEach(r => {
+        if (r.ioc_type === 'IP')  ips  = r.count;
+        if (r.ioc_type === 'URL') urls = r.count;
+      });
+      scrambleTo('stat-ips',  ips);
+      scrambleTo('stat-urls', urls);
+
+      // Bar chart: sources
+      const srcLabels = (d.by_source || []).map(r => r.source);
+      const srcData   = (d.by_source || []).map(r => r.count);
+      const ctxSrc    = document.getElementById('chart-sources');
+      if (ctxSrc) {
+        const existing = Chart.getChart(ctxSrc);
+        if (existing) existing.destroy();
+        new Chart(ctxSrc, {
+          type: 'bar',
+          data: {
+            labels: srcLabels,
+            datasets: [{
+              data: srcData,
+              backgroundColor: srcData.map((_, i) =>
+                `hsla(${180 + i * 15}, 80%, 60%, 0.2)`),
+              borderColor: srcData.map((_, i) =>
+                `hsla(${180 + i * 15}, 80%, 60%, 1)`),
+              borderWidth: 1.5,
+              borderRadius: 6
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { color: 'rgba(100,180,255,0.05)' }, ticks: { color: '#7a9bbf' } },
+              y: { grid: { display: false }, ticks: { color: '#7a9bbf', font: { size: 11 } } }
+            },
+            animation: { duration: 1000, easing: 'easeOutExpo' }
+          }
+        });
+      }
+
+      // Doughnut chart: types
+      const typeLabels = (d.by_type || []).map(r => r.ioc_type);
+      const typeData   = (d.by_type || []).map(r => r.count);
+      const palette    = ['#00d4ff', '#b06bff', '#ffcc00', '#00ff88', '#ff3366'];
+      const ctxType    = document.getElementById('chart-types');
+      if (ctxType) {
+        const existing = Chart.getChart(ctxType);
+        if (existing) existing.destroy();
+        new Chart(ctxType, {
+          type: 'doughnut',
+          data: {
+            labels: typeLabels,
+            datasets: [{
+              data: typeData,
+              backgroundColor: palette.map(c => c + '33'),
+              borderColor: palette,
+              borderWidth: 2,
+              hoverOffset: 10
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '70%',
+            plugins: { legend: { position: 'bottom', labels: { color: '#7a9bbf', boxWidth: 12, padding: 14 } } },
+            animation: { animateRotate: true, duration: 1200, easing: 'easeOutExpo' }
+          }
+        });
+      }
+    } catch (err) { console.error('[Dashboard] Stats error:', err); }
+  }
+
+  async function initGlobe() {
+    const container = document.getElementById('globe-container');
+    const loading   = document.getElementById('globe-loading');
+    if (!container || !window.Globe) return;
+    try {
+      const res  = await fetch('/api/globe_data');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (loading) loading.remove();
+      // Clear previous globe instance
+      container.innerHTML = '';
+      const globe = Globe()(container)
+        .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
+        .backgroundColor('rgba(0,0,0,0)')
+        .pointsData(data.points || [])
+        .pointAltitude(d => (d.size || 0.2) * 0.5)
+        .pointColor('color')
+        .pointRadius(0.4)
+        .pointsMerge(false)
+        .atmosphereColor('rgba(0,180,255,0.3)')
+        .atmosphereAltitude(0.18);
+
+      globe.controls().autoRotate      = true;
+      globe.controls().autoRotateSpeed = 1.0;
+      globe.controls().enableZoom      = false;
+    } catch (err) { console.error('[Dashboard] Globe error:', err); }
+  }
+
+  // Run immediately (SwupScriptsPlugin re-evaluates on each visit)
+  loadStats();
+  initGlobe();
+
+  // Auto-refresh stats every 60s
+  if (window._dashTimer) clearInterval(window._dashTimer);
+  window._dashTimer = setInterval(() => {
+    if (document.getElementById('stat-total')) loadStats();
+    else clearInterval(window._dashTimer);
+  }, 60_000);
+
+})();
+</script>
+{% endblock %}

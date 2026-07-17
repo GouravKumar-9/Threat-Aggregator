@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ThreatAggregator — Mission Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  
+  <script src="https://unpkg.com/swup@4"></script>
+  <script src="https://unpkg.com/@swup/scripts-plugin@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/TextPlugin.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="//unpkg.com/globe.gl"></script>
+
+  {% block head %}{% endblock %}
+
+  <style>
+    /* =========================================================
+       Design Tokens — Deep Space Mission Control
+       ========================================================= */
+    :root {
+      --bg:          #010008;
+      --surface:     rgba(8, 12, 28, 0.7);
+      --surface-hov: rgba(15, 22, 45, 0.9);
+      --border:      rgba(100, 180, 255, 0.08);
+      --border-hov:  rgba(45, 212, 191, 0.4);
+      --text:        #e8f4ff;
+      --muted:       #7a9bbf;
+      --accent:      #00d4ff;
+      --accent2:     #ff6b35;
+      --accent-glow: rgba(0, 212, 255, 0.25);
+      --success:     #00ff88;
+      --warning:     #ffcc00;
+      --danger:      #ff3366;
+      --purple:      #b06bff;
+      --saffron:     #FF9933;
+      --india-green: #138808;
+      --india-navy:  #000080;
+      --radius:      16px;
+      --radius-sm:   10px;
+      --shadow:      0 12px 48px -8px rgba(0,0,0,0.9);
+      --ease:        cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-in:     cubic-bezier(0.8, 0, 0.2, 1);
+    }
+
+    /* =========================================================
+       Reset & Base
+       ========================================================= */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+    }
+
+    /* =========================================================
+       Hyperspace Transition — Page is sucked into / ejected from ship
+       ========================================================= */
+    .transition-fade {
+      transition: all 0.75s var(--ease);
+      opacity: 1;
+      transform: scale(1) perspective(1200px) rotateX(0deg);
+      filter: blur(0px);
+      transform-origin: 50% 100%;
+    }
+    /* Entering page: emerges from below (from the ship) */
+    html.is-animating .transition-fade {
+      opacity: 0;
+      transform: scale(0.05) perspective(1200px) rotateX(25deg);
+      filter: blur(18px);
+      transform-origin: 50% 100%;
+    }
+    /* Leaving page: sucked downward into the ship */
+    html.is-animating .transition-fade.is-leaving {
+      transition: all 0.6s var(--ease-in);
+      opacity: 0;
+      transform: scale(0.05) perspective(1200px) rotateX(-25deg);
+      filter: blur(30px);
+      transform-origin: 50% 100%;
+    }
+
+    /* =========================================================
+       Sidebar
+       ========================================================= */
+    .sidebar {
+      width: 220px;
+      min-height: 100vh;
+      background: rgba(5, 8, 20, 0.92);
+      backdrop-filter: blur(20px);
+      border-right: 1px solid var(--border);
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      z-index: 100;
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon { font-size: 1.6rem; }
+    .brand-name {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-shadow: 0 0 12px var(--accent-glow);
+    }
+    .brand-name span { color: var(--text); }
+
+    .nav-links {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.88rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      transition: all 0.3s var(--ease);
+      border: 1px solid transparent;
+      position: relative;
+      overflow: hidden;
+    }
+    .nav-link::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(0,212,255,0.1), rgba(176,107,255,0.05));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .nav-link:hover, .nav-link.active {
+      color: var(--text);
+      border-color: rgba(0,212,255,0.2);
+    }
+    .nav-link:hover::before, .nav-link.active::before { opacity: 1; }
+    .nav-link.active {
+      color: var(--accent);
+      border-color: rgba(0,212,255,0.35);
+      text-shadow: 0 0 8px var(--accent-glow);
+      box-shadow: 0 0 16px rgba(0,212,255,0.08), inset 0 0 16px rgba(0,212,255,0.05);
+    }
+    .nav-link.active::after {
+      content: '';
+      position: absolute;
+      left: 0; top: 25%; bottom: 25%;
+      width: 2px;
+      background: var(--accent);
+      border-radius: 2px;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      font-size: 0.8rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+
+    /* =========================================================
+       Main Content
+       ========================================================= */
+    .main-content {
+      flex: 1;
+      padding: 0;
+      min-width: 0;
+      position: relative;
+    }
+
+    .topbar {
+      margin-bottom: 28px;
+    }
+    .topbar h2 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      text-transform: uppercase;
+      text-shadow: 0 0 20px var(--accent-glow);
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .section-header h2 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+    }
+
+    /* =========================================================
+       Cards — Premium Glassmorphism
+       ========================================================= */
+    .card {
+      background: var(--surface);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      transition: all 0.4s var(--ease);
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+      opacity: 0.5;
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 0%, rgba(0,212,255,0.06) 0%, transparent 60%);
+      opacity: 0;
+      transition: opacity 0.4s var(--ease);
+      pointer-events: none;
+    }
+    .card:hover {
+      border-color: var(--border-hov);
+      transform: translateY(-5px) scale(1.01);
+      box-shadow: 0 24px 48px -8px rgba(0,212,255,0.12), var(--shadow);
+    }
+    .card:hover::after { opacity: 1; }
+
+    .card-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+      margin-bottom: 16px;
+      text-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* =========================================================
+       Buttons
+       ========================================================= */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.25s var(--ease);
+      border: 1px solid transparent;
+      font-family: 'Inter', sans-serif;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      color: #000;
+      border-color: rgba(255,255,255,0.1);
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 8px 30px var(--accent-glow);
+    }
+    .btn-ghost {
+      background: var(--surface);
+      color: var(--muted);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover {
+      color: var(--text);
+      border-color: var(--border-hov);
+      background: var(--surface-hov);
+    }
+
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+
+    /* =========================================================
+       Animations
+       ========================================================= */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(40px); filter: blur(6px); }
+      to   { opacity: 1; transform: translateY(0);    filter: blur(0px); }
+    }
+    @keyframes slideInRight {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+    @keyframes glowPulse {
+      0%, 100% { box-shadow: 0 0 10px var(--accent-glow); }
+      50%       { box-shadow: 0 0 30px var(--accent-glow), 0 0 15px rgba(176,107,255,0.3); }
+    }
+
+
+    /* =========================================================
+       Toasts
+       ========================================================= */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 99999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .toast {
+      background: rgba(5, 8, 20, 0.96);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 14px 18px;
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      animation: slideInRight 0.4s var(--ease) forwards;
+      min-width: 280px;
+    }
+    .toast.danger { border-left-color: var(--danger); }
+    .toast.warning { border-left-color: var(--warning); }
+    .toast-title { font-weight: 600; margin-bottom: 4px; display: block; font-size: 0.85rem; }
+    .toast-body  { font-size: 0.82rem; color: var(--muted); }
+
+    {% block styles %}{% endblock %}
+  </style>
+</head>
+<body>
+
+  <!-- Starfield Canvas -->
+  <canvas id="starfield" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:0;pointer-events:none;"></canvas>
+
+
+
+  <!-- Indian Tricolor Rafale Spaceship -->
+  <div id="ship-wrapper">
+    <!-- Warp rings appear on launch -->
+    <div id="warp-rings">
+      <div class="warp-ring"></div>
+      <div class="warp-ring"></div>
+      <div class="warp-ring"></div>
+    </div>
+    <!-- Rafale SVG — Tricolor Livery -->
+    <svg id="rafale-svg" xmlns="http://www.w3.org/2000/svg" viewBox="-80 0 260 210" overflow="visible"
+         style="width:200px;height:200px;animation:shipGlow 2s infinite alternate;">
+      <!-- === Engine Exhaust (blue glow + saffron flame) === -->
+      <ellipse cx="60" cy="190" rx="14" ry="6" fill="rgba(0,212,255,0.3)" />
+      <polygon id="engine-flame" points="46,175 60,200 74,175"
+               fill="url(#flameGrad)" style="animation:engineFlicker 0.08s infinite alternate; transform-origin:60px 175px;" />
+      <!-- Flame gradient -->
+      <defs>
+        <linearGradient id="flameGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#FF9933"/>
+          <stop offset="60%" stop-color="#ff5500"/>
+          <stop offset="100%" stop-color="#00d4ff" stop-opacity="0.3"/>
+        </linearGradient>
+        <linearGradient id="wingGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#138808"/>
+          <stop offset="100%" stop-color="#0a5a05"/>
+        </linearGradient>
+      </defs>
+
+      <!-- === Main Delta Wings (India Green) === -->
+      <polygon points="60,40 8,160 112,160" fill="url(#wingGrad)" stroke="#1a6b0a" stroke-width="1" />
+      <!-- Wing edge highlight -->
+      <polygon points="60,40 8,160 20,160 60,55" fill="rgba(255,255,255,0.07)" />
+      <polygon points="60,40 112,160 100,160 60,55" fill="rgba(255,255,255,0.07)" />
+
+      <!-- === Saffron Canards === -->
+      <polygon points="60,55 30,75 30,82 60,68" fill="#FF9933" stroke="#CC7700" stroke-width="0.5" />
+      <polygon points="60,55 90,75 90,82 60,68" fill="#FF9933" stroke="#CC7700" stroke-width="0.5" />
+
+      <!-- === Fuselage — Tricolor (top=saffron, mid=white, bot=green) === -->
+      <!-- Green base -->
+      <polygon points="60,12 49,80 49,175 71,175 71,80" fill="#138808" />
+      <!-- White mid section -->
+      <polygon points="60,12 49,80 71,80" fill="#FFFFFF" />
+      <rect x="49" y="100" width="22" height="45" fill="#FFFFFF" />
+      <!-- Saffron nose / top -->
+      <polygon points="60,0 53,50 67,50" fill="#FF9933" />
+      <rect x="53" y="45" width="14" height="30" fill="#FF9933" />
+      <!-- Divide lines -->
+      <line x1="49" y1="80"  x2="71" y2="80"  stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+      <line x1="49" y1="100" x2="71" y2="100" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+      <line x1="49" y1="145" x2="71" y2="145" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+
+      <!-- === Ashoka Chakra (navy blue) on white panel === -->
+      <g transform="translate(60,122)">
+        <circle r="10" fill="none" stroke="#000080" stroke-width="1.5"/>
+        <circle r="2"  fill="#000080"/>
+        <!-- 24 spokes -->
+        <g stroke="#000080" stroke-width="0.6">
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(0)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(15)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(30)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(45)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(60)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(75)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(90)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(105)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(120)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(135)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(150)"/>
+          <line x1="0" y1="-10" x2="0" y2="10" transform="rotate(165)"/>
+        </g>
+      </g>
+
+      <!-- === Cockpit Canopy (minimal — Modi is outside!) === -->
+      <ellipse cx="60" cy="28" rx="7" ry="10" fill="rgba(0,212,255,0.15)" stroke="rgba(0,212,255,0.5)" stroke-width="1"/>
+      <ellipse cx="60" cy="25" rx="4" ry="5" fill="rgba(255,255,255,0.12)"/>
+
+      <!-- === Modi Ji — Big, Clear, Standing to the LEFT of the ship === -->
+      <g id="modi-pilot" transform="translate(-30, 30)">
+        <!-- Pilot seat / cockpit glow around Modi -->
+        <ellipse cx="0" cy="50" rx="28" ry="8" fill="rgba(0,212,255,0.08)"/>
+
+        <!-- White Kurta / Sherwani body -->
+        <rect x="-18" y="30" width="36" height="45" rx="5" fill="#f0ece0"/>
+        <!-- Sherwani vertical stripe -->
+        <rect x="-3" y="30" width="6" height="45" fill="rgba(255,153,51,0.25)"/>
+        <!-- Bottom of sherwani (slight curve) -->
+        <ellipse cx="0" cy="75" rx="18" ry="4" fill="#e8e4d8"/>
+        <!-- Collar / Modi jacket detail -->
+        <path d="M -6 30 L 0 40 L 6 30" fill="#FF9933" stroke="#CC7700" stroke-width="0.5"/>
+        <!-- Buttons -->
+        <circle cx="0" cy="45" r="1.5" fill="rgba(180,140,80,0.7)"/>
+        <circle cx="0" cy="55" r="1.5" fill="rgba(180,140,80,0.7)"/>
+        <circle cx="0" cy="65" r="1.5" fill="rgba(180,140,80,0.7)"/>
+
+        <!-- Neck -->
+        <rect x="-7" y="18" width="14" height="14" rx="6" fill="#c8a882"/>
+
+        <!-- Head (round like Modi ji's) -->
+        <ellipse cx="0" cy="0" rx="18" ry="20" fill="#c8a882"/>
+        <!-- Shadow on face -->
+        <ellipse cx="3" cy="2" rx="14" ry="16" fill="rgba(150,100,50,0.15)"/>
+
+        <!-- White hair (thick, swept back) -->
+        <ellipse cx="0" cy="-16" rx="18" ry="8" fill="#e0e0e0"/>
+        <ellipse cx="-5" cy="-13" rx="14" ry="6" fill="#d8d8d8"/>
+        <!-- Hair line detail -->
+        <path d="M -16 -14 Q 0 -22 16 -14" stroke="#bbb" stroke-width="1" fill="none"/>
+        <path d="M -14 -12 Q 0 -20 14 -12" stroke="#ccc" stroke-width="0.8" fill="none"/>
+
+        <!-- White beard (full, iconic) -->
+        <ellipse cx="0" cy="13" rx="16" ry="13" fill="#e8e8e8"/>
+        <ellipse cx="0" cy="15" rx="13" ry="10" fill="#f0f0f0"/>
+        <!-- Beard texture lines -->
+        <line x1="-10" y1="8"  x2="-8"  y2="22" stroke="#ccc" stroke-width="0.8"/>
+        <line x1="-5"  y1="6"  x2="-4"  y2="24" stroke="#ccc" stroke-width="0.8"/>
+        <line x1="0"   y1="6"  x2="0"   y2="25" stroke="#ccc" stroke-width="0.8"/>
+        <line x1="5"   y1="6"  x2="4"   y2="24" stroke="#ccc" stroke-width="0.8"/>
+        <line x1="10"  y1="8"  x2="8"   y2="22" stroke="#ccc" stroke-width="0.8"/>
+        <!-- Beard bottom curve -->
+        <path d="M -12 16 Q 0 28 12 16" stroke="#ddd" stroke-width="1" fill="none"/>
+
+        <!-- Iconic Round Glasses -->
+        <circle cx="-7" cy="-1" r="6.5" fill="rgba(200,230,255,0.2)" stroke="#3a2a1a" stroke-width="1.8"/>
+        <circle cx="7"  cy="-1" r="6.5" fill="rgba(200,230,255,0.2)" stroke="#3a2a1a" stroke-width="1.8"/>
+        <!-- Glasses bridge -->
+        <line x1="-0.5" y1="-1" x2="0.5" y2="-1" stroke="#3a2a1a" stroke-width="1.5"/>
+        <!-- Glasses temples -->
+        <line x1="-13.5" y1="-1" x2="-18" y2="-3" stroke="#3a2a1a" stroke-width="1.2"/>
+        <line x1="13.5"  y1="-1" x2="18"  y2="-3" stroke="#3a2a1a" stroke-width="1.2"/>
+        <!-- Eyes -->
+        <circle cx="-7" cy="-1" r="2.5" fill="#1a0a00"/>
+        <circle cx="7"  cy="-1" r="2.5" fill="#1a0a00"/>
+        <!-- Eye shine -->
+        <circle cx="-6" cy="-2" r="0.8" fill="rgba(255,255,255,0.7)"/>
+        <circle cx="8"  cy="-2" r="0.8" fill="rgba(255,255,255,0.7)"/>
+
+        <!-- Thick eyebrows -->
+        <path d="M -14 -9 Q -7 -13 -1 -9" stroke="#555" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M  1 -9 Q  7 -13 14 -9" stroke="#555" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+        <!-- Moustache (full & iconic) -->
+        <path d="M -10 6 Q -5 9 0 7 Q 5 9 10 6" stroke="#888" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <!-- Philtrum -->
+        <line x1="0" y1="4" x2="0" y2="7" stroke="rgba(150,100,50,0.3)" stroke-width="1"/>
+
+        <!-- Left arm (static, at side) -->
+        <line x1="-18" y1="35" x2="-24" y2="60" stroke="#c8a882" stroke-width="5" stroke-linecap="round"/>
+        <circle cx="-24" cy="62" r="5" fill="#c8a882"/>
+
+        <!-- RIGHT arm — waving enthusiastically! -->
+        <g id="modi-wave-arm">
+          <line x1="18" y1="35" x2="34" y2="10" stroke="#c8a882" stroke-width="5" stroke-linecap="round"/>
+          <!-- Forearm -->
+          <line x1="34" y1="10" x2="40" y2="-8" stroke="#c8a882" stroke-width="4" stroke-linecap="round"/>
+          <!-- Hand -->
+          <circle cx="40" cy="-10" r="6" fill="#c8a882"/>
+          <!-- Fingers spread wide -->
+          <line x1="40" y1="-16" x2="38" y2="-24" stroke="#c8a882" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="43" y1="-15" x2="44" y2="-23" stroke="#c8a882" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="46" y1="-13" x2="49" y2="-20" stroke="#c8a882" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="37" y1="-15" x2="34" y2="-22" stroke="#c8a882" stroke-width="2.5" stroke-linecap="round"/>
+          <!-- Thumb -->
+          <line x1="35" y1="-7"  x2="30" y2="-13" stroke="#c8a882" stroke-width="2.5" stroke-linecap="round"/>
+        </g>
+      </g>
+
+      <!-- === Floating Speech Bubble beside Modi ji === -->
+      <g id="modi-speech" transform="translate(-62, -5)">
+        <rect x="-42" y="-20" width="84" height="36" rx="10" fill="rgba(255,255,255,0.97)" stroke="#FF9933" stroke-width="2"/>
+        <!-- Tail pointing right toward Modi -->
+        <polygon points="42,8 55,18 42,-4" fill="rgba(255,255,255,0.97)" stroke="#FF9933" stroke-width="1"/>
+        <text x="0" y="-4" text-anchor="middle" fill="#000080" font-size="9" font-family="Inter" font-weight="800">Jai Hind! 🇮🇳</text>
+        <text x="0" y="10" text-anchor="middle" fill="#FF9933" font-size="7.5" font-family="Inter" font-weight="600">Mission Control 🚀</text>
+      </g>
+
+      <!-- === Side air intakes === -->
+      <polygon points="49,90 38,115 45,118 49,100" fill="#0a5a05" stroke="#1a6b0a" stroke-width="0.5"/>
+      <polygon points="71,90 82,115 75,118 71,100" fill="#0a5a05" stroke="#1a6b0a" stroke-width="0.5"/>
+
+      <!-- === Tail fins === -->
+      <polygon points="49,145 30,175 42,175 49,160" fill="#FF9933" stroke="#CC7700" stroke-width="0.5"/>
+      <polygon points="71,145 90,175 78,175 71,160" fill="#FF9933" stroke="#CC7700" stroke-width="0.5"/>
+    </svg>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <span class="brand-name">Threat<span>Aggregator</span></span>
+    </div>
+    
+    <nav class="nav-links">
+      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+        <span>📊</span> Dashboard
+      </a>
+      <a href="/threats" class="nav-link {% if request.url.path == '/threats' %}active{% endif %}">
+        <span>🔍</span> Threat DB
+      </a>
+      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+        <span>⚙️</span> Settings
+      </a>
+    </nav>
+    
+    <div class="sidebar-footer">
+      <div style="margin-bottom:6px;">👤 {{ user.username }}</div>
+      <button onclick="logout()" style="background:none;border:none;color:var(--muted);padding:4px 0;cursor:pointer;font-size:0.78rem;text-decoration:underline;">Logout</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main id="swup" class="transition-fade main-content">
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+  </main>
+
+  <script>
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.href = '/';
+    }
+
+    // SSE Notifications
+    function initSSE() {
+      if (document.getElementById('toast-container')) return;
+      const tc = document.createElement('div');
+      tc.id = 'toast-container';
+      document.body.appendChild(tc);
+      const evtSource = new EventSource('/api/stream');
+      evtSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          showToast(data.message, data.type || 'info', data.source);
+        } catch (err) {}
+      };
+    }
+
+    function showToast(message, type = 'info', source = '') {
+      const tc = document.getElementById('toast-container');
+      if (!tc) return;
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      const title = type === 'danger' ? '🚨 Threat Detected' : '🔔 Notification';
+      toast.innerHTML = `<span class="toast-title">${title}</span><span class="toast-body">${message}<br><small>${source}</small></span>`;
+      tc.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'slideInRight 0.4s ease-in reverse forwards';
+        setTimeout(() => toast.remove(), 400);
+      }, 5000);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initSSE();
+
+      // =====================================================
+      // 3D Starfield Engine
+      // =====================================================
+      const canvas = document.getElementById('starfield');
+      const ctx    = canvas.getContext('2d');
+      let W, H, stars = [], warp = 0;
+
+      function initStars() {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+        stars = [];
+        for (let i = 0; i < 800; i++) {
+          stars.push({
+            x:  (Math.random() - 0.5) * W * 3,
+            y:  (Math.random() - 0.5) * H * 3,
+            z:  Math.random() * 2000,
+            pz: Math.random() * 2000,
+            hue: Math.random() < 0.05 ? 200 : 0   // 5% blue tinted
+          });
+        }
+      }
+      initStars();
+      window.addEventListener('resize', initStars);
+
+      function drawStars() {
+        // Trail blur when warping
+        ctx.fillStyle = warp > 0.05
+          ? `rgba(1, 0, 8, ${0.5 - warp * 0.35})`
+          : 'rgba(1, 0, 8, 0.92)';
+        ctx.fillRect(0, 0, W, H);
+
+        const cx = W / 2, cy = H / 2;
+        const speed = 0.6 + warp * 90;
+
+        for (const s of stars) {
+          s.pz = s.z;
+          s.z -= speed;
+          if (s.z <= 0) {
+            s.z  = 2000;
+            s.pz = 2000;
+            s.x  = (Math.random() - 0.5) * W * 3;
+            s.y  = (Math.random() - 0.5) * H * 3;
+          }
+
+          const px  = cx + (s.x / s.z)  * 500;
+          const py  = cy + (s.y / s.z)  * 500;
+          const ppx = cx + (s.x / s.pz) * 500;
+          const ppy = cy + (s.y / s.pz) * 500;
+          const sz  = Math.max(0.1, (1 - s.z / 2000) * 2.5);
+          const br  = 1 - s.z / 2000;
+
+          if (warp > 0.08) {
+            // Warp streaks: saffron / cyan gradient
+            const grad = ctx.createLinearGradient(ppx, ppy, px, py);
+            const alpha = Math.min(1, warp * 1.5);
+            grad.addColorStop(0, `rgba(255,153,51,${alpha * 0.6})`);
+            grad.addColorStop(1, `rgba(0,212,255,${alpha})`);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth   = sz * (1 + warp * 3);
+            ctx.beginPath();
+            ctx.moveTo(ppx, ppy);
+            ctx.lineTo(px, py);
+            ctx.stroke();
+          }
+
+          // Star dot
+          const col = s.hue > 0
+            ? `rgba(100,200,255,${br})`
+            : `rgba(255,255,255,${br})`;
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(px, py, sz, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        requestAnimationFrame(drawStars);
+      }
+      drawStars();
+
+      // =====================================================
+      // Swup — Spaceship Transition Choreography
+      // =====================================================
+      window.swup = new Swup({ plugins: [new SwupScriptsPlugin()] });
+
+      // Update active nav
+      swup.hooks.on('page:view', () => {
+        const path = window.location.pathname;
+        document.querySelectorAll('.nav-link').forEach(lnk => {
+          lnk.classList.toggle('active', lnk.getAttribute('href') === path);
+        });
+      });
+
+      const ship = document.getElementById('ship-wrapper');
+      let warpTick;
+
+      function rampWarp(target, stepUp, stepDown, cb) {
+        clearInterval(warpTick);
+        warpTick = setInterval(() => {
+          if (warp < target) {
+            warp = Math.min(target, warp + stepUp);
+          } else if (warp > target) {
+            warp = Math.max(target, warp - stepDown);
+            if (warp <= target) { clearInterval(warpTick); cb && cb(); }
+          }
+          if (warp >= target && target > 0) { clearInterval(warpTick); cb && cb(); }
+        }, 16);
+      }
+
+      // PHASE 1 — Tab clicked: ship rises
+      swup.hooks.on('visit:start', () => {
+        ship.classList.remove('launching');
+        ship.classList.add('rising');
+        rampWarp(1, 0.06, 0, null);
+      });
+
+      // PHASE 2 — New page incoming
+      swup.hooks.on('animation:in:start', () => {
+        ship.classList.remove('rising');
+        ship.classList.add('launching');
+      });
+
+      // PHASE 3 — New page settled: warp decelerates
+      swup.hooks.on('animation:in:end', () => {
+        rampWarp(0, 0, 0.018, () => {
+          ship.classList.remove('launching');
+        });
+      });
+    });
+  </script>
+</body>
+</html>

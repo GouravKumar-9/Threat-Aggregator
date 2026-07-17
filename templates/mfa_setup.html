@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Setup MFA — Threat Aggregator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --surface: #1a1d24;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --danger: #f87171;
+      --border: #334155;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .setup-container {
+      background: var(--surface);
+      padding: 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 400px;
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+    h2 {
+      margin-top: 0;
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+    p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    #qrcode-box {
+      background: white;
+      padding: 10px;
+      display: inline-block;
+      border-radius: 6px;
+      margin-bottom: 1.5rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+      text-align: left;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    input {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      box-sizing: border-box;
+      text-align: center;
+      letter-spacing: 2px;
+      font-size: 1.2rem;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button {
+      width: 100%;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #0f1115;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 1rem;
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+    .error {
+      color: var(--danger);
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="setup-container">
+  <h2>Enable Two-Factor Authentication</h2>
+  <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the generated code below.</p>
+  
+  <div id="qrcode-box">Loading...</div>
+  <div id="error-msg" class="error"></div>
+  
+  <form id="setup-form">
+    <div class="form-group">
+      <input type="text" id="mfa_code" maxlength="6" pattern="\d{6}" placeholder="000000" required autocomplete="off">
+    </div>
+    <button type="submit">Verify & Enable</button>
+  </form>
+</div>
+
+<script>
+  let secret = '';
+
+  async function loadSecret() {
+    try {
+      const res = await fetch('/api/auth/generate-mfa', { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        document.getElementById('qrcode-box').innerHTML = `<span style="color:red">Failed to load MFA data</span>`;
+        return;
+      }
+      
+      secret = data.secret;
+      
+      const typeNumber = 0;
+      const errorCorrectionLevel = 'L';
+      const qr = qrcode(typeNumber, errorCorrectionLevel);
+      qr.addData(data.uri);
+      qr.make();
+      document.getElementById('qrcode-box').innerHTML = qr.createImgTag(4, 8);
+    } catch (err) {
+      document.getElementById('qrcode-box').innerHTML = `<span style="color:red">Network error</span>`;
+    }
+  }
+
+  document.getElementById('setup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const code = document.getElementById('mfa_code').value;
+    const errorMsg = document.getElementById('error-msg');
+    errorMsg.style.display = 'none';
+    
+    if (!secret) return;
+    
+    const fd = new FormData();
+    fd.append('secret', secret);
+    fd.append('code', code);
+    
+    try {
+      const res = await fetch('/api/auth/enable-mfa', {
+        method: 'POST',
+        body: fd
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        window.location.href = data.redirect;
+      } else {
+        errorMsg.textContent = data.detail || 'Invalid code. Try again.';
+        errorMsg.style.display = 'block';
+      }
+    } catch (err) {
+      errorMsg.textContent = 'Network error.';
+      errorMsg.style.display = 'block';
+    }
+  });
+
+  // Load the QR code on startup
+  loadSecret();
+</script>
+</body>
+</html>
