@@ -17,7 +17,8 @@ from core.database import (
     get_recent_iocs,
     get_stats,
     get_user_by_username,
-    set_user_mfa_secret
+    set_user_mfa_secret,
+    create_user
 )
 from core.feeds import fetch_feodo_tracker, fetch_urlhaus, fetch_alienvault_otx
 from core.virustotal import lookup as vt_lookup
