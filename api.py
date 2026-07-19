@@ -51,6 +51,15 @@ async def lifespan(app: FastAPI):
     """Initialize the database on startup."""
     init_db()
     
+    # Auto-provision admin user from environment variables
+    admin_user = os.getenv("ADMIN_USERNAME")
+    admin_pass = os.getenv("ADMIN_PASSWORD")
+    if admin_user and admin_pass:
+        from core.auth import get_password_hash
+        if not get_user_by_username(admin_user):
+            create_user(admin_user, get_password_hash(admin_pass))
+            print(f"[*] Auto-provisioned admin user: {admin_user}")
+
     # Schedule automated background tasks
     scheduler.add_job(_run_feed_update, 'interval', minutes=60, id='feed_update')
     scheduler.add_job(age_out_iocs, 'interval', days=1, id='age_out_iocs')
