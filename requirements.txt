@@ -10,3 +10,4 @@ pyotp
 qrcode
 jinja2==3.1.4
 APScheduler
+psycopg2-binary

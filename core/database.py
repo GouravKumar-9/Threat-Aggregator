@@ -1,36 +1,38 @@
-import sqlite3
+import psycopg2
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'threat_data.db')
-
-
 def get_connection():
-    """Returns a sqlite3 connection, ensuring the data directory exists."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    """Returns a psycopg2 connection using the DATABASE_URL environment variable."""
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise Exception("DATABASE_URL environment variable is not set. Please set it to connect to PostgreSQL.")
+    
+    # For Render and similar platforms, sslmode prefer/require is usually needed
+    sslmode = 'require' if 'onrender.com' in database_url else 'prefer'
+    return psycopg2.connect(database_url, sslmode=sslmode)
 
 
 def init_db():
-    """Initializes the database table if it doesn't exist."""
+    """Initializes the database tables if they don't exist."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS iocs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             ioc_value TEXT UNIQUE,
             ioc_type TEXT,
             source TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
     # Check for existing columns to support upgrades
-    cursor.execute("PRAGMA table_info(iocs)")
-    columns = [col[1] for col in cursor.fetchall()]
+    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name='iocs'")
+    columns = [col[0] for col in cursor.fetchall()]
     if "confidence_score" not in columns:
         cursor.execute("ALTER TABLE iocs ADD COLUMN confidence_score INTEGER DEFAULT 50")
     if "last_seen" not in columns:
-        cursor.execute("ALTER TABLE iocs ADD COLUMN last_seen DATETIME")
+        cursor.execute("ALTER TABLE iocs ADD COLUMN last_seen TIMESTAMP")
     if "stix_data" not in columns:
         cursor.execute("ALTER TABLE iocs ADD COLUMN stix_data TEXT")
     if "lat" not in columns:
@@ -40,7 +42,7 @@ def init_db():
         
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE,
             password_hash TEXT,
             mfa_secret TEXT
@@ -84,15 +86,16 @@ def insert_iocs(ioc_list):
         try:
             cursor.execute('''
                 INSERT INTO iocs (ioc_value, ioc_type, source, stix_data, lat, lon)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT(ioc_value) DO UPDATE SET
-                    confidence_score = MIN(confidence_score + 10, 100),
+                    confidence_score = LEAST(iocs.confidence_score + 10, 100),
                     last_seen = CURRENT_TIMESTAMP,
                     stix_data = excluded.stix_data,
                     lat = COALESCE(iocs.lat, excluded.lat),
                     lon = COALESCE(iocs.lon, excluded.lon)
             ''', (ioc['ioc_value'], ioc['ioc_type'], ioc['source'], stix_data, lat, lon))
-        except sqlite3.IntegrityError:
+        except psycopg2.IntegrityError:
+            conn.rollback()  # Postgres requires rollback on error to continue
             pass
 
     conn.commit()
@@ -106,14 +109,14 @@ def age_out_iocs():
     
     # 1. Decrease confidence score by 10 for records not seen in the last 3 days
     cursor.execute('''
-        UPDATE iocs SET confidence_score = MAX(confidence_score - 10, 0)
-        WHERE last_seen <= datetime('now', '-3 days')
+        UPDATE iocs SET confidence_score = GREATEST(confidence_score - 10, 0)
+        WHERE last_seen <= NOW() - INTERVAL '3 days'
     ''')
     
     # 2. Delete records not seen in the last 7 days and with confidence score <= 10
     cursor.execute('''
         DELETE FROM iocs 
-        WHERE last_seen <= datetime('now', '-7 days') AND confidence_score <= 10
+        WHERE last_seen <= NOW() - INTERVAL '7 days' AND confidence_score <= 10
     ''')
     
     conn.commit()
@@ -125,7 +128,7 @@ def search_ioc(ioc_value):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT ioc_value, ioc_type, source, timestamp FROM iocs WHERE ioc_value = ?',
+        'SELECT ioc_value, ioc_type, source, timestamp FROM iocs WHERE ioc_value = %s',
         (ioc_value,)
     )
     result = cursor.fetchone()
@@ -141,8 +144,8 @@ def get_all_iocs(limit: int = 50, offset: int = 0):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT id, ioc_value, ioc_type, source, timestamp, confidence_score, last_seen, stix_data FROM iocs '
-        'ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+        'SELECT id, ioc_value, ioc_type, source, timestamp, confidence_score, last_seen, stix_data, lat, lon FROM iocs '
+        'ORDER BY timestamp DESC LIMIT %s OFFSET %s',
         (limit, offset)
     )
     rows = cursor.fetchall()
@@ -156,7 +159,9 @@ def get_all_iocs(limit: int = 50, offset: int = 0):
             "timestamp": r[4],
             "confidence_score": r[5],
             "last_seen": r[6],
-            "stix_data": r[7]
+            "stix_data": r[7],
+            "lat": r[8],
+            "lon": r[9]
         }
         for r in rows
     ]
@@ -178,7 +183,7 @@ def get_recent_iocs(n: int = 20):
     cursor = conn.cursor()
     cursor.execute(
         'SELECT id, ioc_value, ioc_type, source, timestamp FROM iocs '
-        'ORDER BY timestamp DESC LIMIT ?',
+        'ORDER BY timestamp DESC LIMIT %s',
         (n,)
     )
     rows = cursor.fetchall()
@@ -227,11 +232,11 @@ def get_stats():
     cursor.execute(
         '''SELECT DATE(timestamp) as day, COUNT(*) as cnt
            FROM iocs
-           WHERE timestamp >= DATE('now', '-14 days')
+           WHERE timestamp >= CURRENT_DATE - INTERVAL '14 days'
            GROUP BY day
            ORDER BY day ASC'''
     )
-    daily_trend = [{"date": r[0], "count": r[1]} for r in cursor.fetchall()]
+    daily_trend = [{"date": str(r[0]), "count": r[1]} for r in cursor.fetchall()]
 
     conn.close()
     return {
@@ -250,7 +255,7 @@ def get_user_by_username(username: str):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT id, username, password_hash, mfa_secret FROM users WHERE username = ?',
+        'SELECT id, username, password_hash, mfa_secret FROM users WHERE username = %s',
         (username,)
     )
     row = cursor.fetchone()
@@ -270,12 +275,13 @@ def create_user(username: str, password_hash: str):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            'INSERT INTO users (username, password_hash) VALUES (?, ?)',
+            'INSERT INTO users (username, password_hash) VALUES (%s, %s) RETURNING id',
             (username, password_hash)
         )
-        user_id = cursor.lastrowid
+        user_id = cursor.fetchone()[0]
         conn.commit()
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         user_id = None
     finally:
         conn.close()
@@ -286,7 +292,7 @@ def set_user_mfa_secret(user_id: int, secret: str):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'UPDATE users SET mfa_secret = ? WHERE id = ?',
+        'UPDATE users SET mfa_secret = %s WHERE id = %s',
         (secret, user_id)
     )
     conn.commit()
